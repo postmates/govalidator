@@ -703,7 +703,79 @@ func ValidateStruct(s interface{}) (bool, error) {
 				errs = append(errs, err)
 			}
 		}
-		resultField, err2 := typeCheck(valueField, typeField, val, nil)
+		resultField, err2 := typeCheck(valueField, typeField, val, nil, tagName)
+		if err2 != nil {
+
+			// Replace structure name with JSON name if there is a tag on the variable
+			jsonTag := toJSONName(typeField.Tag.Get("json"))
+			if jsonTag != "" {
+				switch jsonError := err2.(type) {
+				case Error:
+					jsonError.Name = jsonTag
+					err2 = jsonError
+				case Errors:
+					for i2, err3 := range jsonError {
+						switch customErr := err3.(type) {
+						case Error:
+							customErr.Name = jsonTag
+							jsonError[i2] = customErr
+						}
+					}
+
+					err2 = jsonError
+				}
+			}
+
+			errs = append(errs, err2)
+		}
+		result = result && resultField && structResult
+	}
+	if len(errs) > 0 {
+		err = errs
+	}
+	return result, err
+}
+
+// FixStruct use tags for fields and calls custom fixes
+func FixStruct(s interface{}) (bool, error) {
+	if s == nil {
+		return true, nil
+	}
+	result := true
+	var err error
+	val := reflect.ValueOf(s)
+	if val.Kind() == reflect.Interface || val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+	// we only accept structs
+	if val.Kind() != reflect.Struct {
+		return false, fmt.Errorf("function only accepts structs; got %s", val.Kind())
+	}
+	var errs Errors
+	for i := 0; i < val.NumField(); i++ {
+		valueField := val.Field(i)
+		typeField := val.Type().Field(i)
+		if typeField.PkgPath != "" {
+			continue // Private field
+		}
+		structResult := true
+		if (valueField.Kind() == reflect.Struct || valueField.Kind() == reflect.Ptr) && typeField.Tag.Get(fixTagName) != "-" {
+			if valueField.Kind() == reflect.Ptr && valueField.IsNil() {
+				continue
+			}
+			var err error
+			var next interface{}
+			if valueField.Kind() == reflect.Struct {
+				next = valueField.Addr().Interface()
+			} else {
+				next = valueField.Interface()
+			}
+			structResult, err = FixStruct(next)
+			if err != nil {
+				errs = append(errs, err)
+			}
+		}
+		resultField, err2 := typeCheck(valueField, typeField, val, nil, fixTagName)
 		if err2 != nil {
 
 			// Replace structure name with JSON name if there is a tag on the variable
@@ -914,7 +986,7 @@ func checkRequired(v reflect.Value, t reflect.StructField, options tagOptionsMap
 	return true, nil
 }
 
-func typeCheck(v reflect.Value, t reflect.StructField, o reflect.Value, options tagOptionsMap) (isValid bool, resultErr error) {
+func typeCheck(v reflect.Value, t reflect.StructField, o reflect.Value, options tagOptionsMap, tagName string) (isValid bool, resultErr error) {
 	if !v.IsValid() {
 		return false, nil
 	}
@@ -947,8 +1019,13 @@ func typeCheck(v reflect.Value, t reflect.StructField, o reflect.Value, options 
 	for validatorName, customErrorMessage := range options {
 		if validatefunc, ok := CustomTypeTagMap.Get(validatorName); ok {
 			delete(options, validatorName)
-
-			if result := validatefunc(v.Interface(), o.Interface()); !result {
+			var val interface{}
+			if tagName == fixTagName {
+				val = v
+			} else {
+				val = v.Interface()
+			}
+			if result := validatefunc(val, o.Interface()); !result {
 				if len(customErrorMessage) > 0 {
 					customTypeErrors = append(customTypeErrors, Error{Name: t.Name, Err: fmt.Errorf(customErrorMessage), CustomErrorMessageExists: true, Validator: stripParams(validatorName)})
 					continue
@@ -1064,7 +1141,7 @@ func typeCheck(v reflect.Value, t reflect.StructField, o reflect.Value, options 
 			var resultItem bool
 			var err error
 			if v.MapIndex(k).Kind() != reflect.Struct {
-				resultItem, err = typeCheck(v.MapIndex(k), t, o, options)
+				resultItem, err = typeCheck(v.MapIndex(k), t, o, options, tagName)
 				if err != nil {
 					return false, err
 				}
@@ -1083,7 +1160,7 @@ func typeCheck(v reflect.Value, t reflect.StructField, o reflect.Value, options 
 			var resultItem bool
 			var err error
 			if v.Index(i).Kind() != reflect.Struct {
-				resultItem, err = typeCheck(v.Index(i), t, o, options)
+				resultItem, err = typeCheck(v.Index(i), t, o, options, tagName)
 				if err != nil {
 					return false, err
 				}
@@ -1107,7 +1184,7 @@ func typeCheck(v reflect.Value, t reflect.StructField, o reflect.Value, options 
 		if v.IsNil() {
 			return true, nil
 		}
-		return typeCheck(v.Elem(), t, o, options)
+		return typeCheck(v.Elem(), t, o, options, tagName)
 	case reflect.Struct:
 		return ValidateStruct(v.Interface())
 	default:
