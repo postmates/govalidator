@@ -1146,7 +1146,12 @@ func typeCheck(v reflect.Value, t reflect.StructField, o reflect.Value, options 
 					return false, err
 				}
 			} else {
-				resultItem, err = ValidateStruct(v.MapIndex(k).Interface())
+				switch tagName {
+				case fixTagName:
+					resultItem, err = FixStruct(v.MapIndex(k).Addr().Interface())
+				default:
+					resultItem, err = ValidateStruct(v.MapIndex(k).Interface())
+				}
 				if err != nil {
 					return false, err
 				}
@@ -1165,7 +1170,12 @@ func typeCheck(v reflect.Value, t reflect.StructField, o reflect.Value, options 
 					return false, err
 				}
 			} else {
-				resultItem, err = ValidateStruct(v.Index(i).Interface())
+				switch tagName {
+				case fixTagName:
+					resultItem, err = FixStruct(v.Index(i).Addr().Interface())
+				default:
+					resultItem, err = ValidateStruct(v.Index(i).Interface())
+				}
 				if err != nil {
 					return false, err
 				}
@@ -1178,7 +1188,12 @@ func typeCheck(v reflect.Value, t reflect.StructField, o reflect.Value, options 
 		if v.IsNil() {
 			return true, nil
 		}
-		return ValidateStruct(v.Interface())
+		switch tagName {
+		case fixTagName:
+			return FixStruct(v.Addr().Interface())
+		default:
+			return ValidateStruct(v.Interface())
+		}
 	case reflect.Ptr:
 		// If the value is a pointer then check its element
 		if v.IsNil() {
@@ -1186,7 +1201,12 @@ func typeCheck(v reflect.Value, t reflect.StructField, o reflect.Value, options 
 		}
 		return typeCheck(v.Elem(), t, o, options, tagName)
 	case reflect.Struct:
-		return ValidateStruct(v.Interface())
+		switch tagName {
+		case fixTagName:
+			return FixStruct(v.Addr().Interface())
+		default:
+			return ValidateStruct(v.Interface())
+		}
 	default:
 		return false, &UnsupportedTypeError{v.Type()}
 	}
