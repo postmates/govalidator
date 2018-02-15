@@ -777,27 +777,6 @@ func FixStruct(s interface{}) (bool, error) {
 		}
 		resultField, err2 := typeCheck(valueField, typeField, val, nil, fixTagName)
 		if err2 != nil {
-
-			// Replace structure name with JSON name if there is a tag on the variable
-			jsonTag := toJSONName(typeField.Tag.Get("json"))
-			if jsonTag != "" {
-				switch jsonError := err2.(type) {
-				case Error:
-					jsonError.Name = jsonTag
-					err2 = jsonError
-				case Errors:
-					for i2, err3 := range jsonError {
-						switch customErr := err3.(type) {
-						case Error:
-							customErr.Name = jsonTag
-							jsonError[i2] = customErr
-						}
-					}
-
-					err2 = jsonError
-				}
-			}
-
 			errs = append(errs, err2)
 		}
 		result = result && resultField && structResult
