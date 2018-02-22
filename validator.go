@@ -759,7 +759,7 @@ func FixStruct(s interface{}) (bool, error) {
 			continue // Private field
 		}
 		structResult := true
-		if (valueField.Kind() == reflect.Struct || valueField.Kind() == reflect.Ptr) && typeField.Tag.Get(fixTagName) != "-" {
+		if valueField.Kind() == reflect.Struct || (valueField.Kind() == reflect.Ptr && typeField.Tag.Get(fixTagName) != "-" && valueField.Elem().Kind() == reflect.Struct) {
 			if valueField.Kind() == reflect.Ptr && valueField.IsNil() {
 				continue
 			}
@@ -777,27 +777,6 @@ func FixStruct(s interface{}) (bool, error) {
 		}
 		resultField, err2 := typeCheck(valueField, typeField, val, nil, fixTagName)
 		if err2 != nil {
-
-			// Replace structure name with JSON name if there is a tag on the variable
-			jsonTag := toJSONName(typeField.Tag.Get("json"))
-			if jsonTag != "" {
-				switch jsonError := err2.(type) {
-				case Error:
-					jsonError.Name = jsonTag
-					err2 = jsonError
-				case Errors:
-					for i2, err3 := range jsonError {
-						switch customErr := err3.(type) {
-						case Error:
-							customErr.Name = jsonTag
-							jsonError[i2] = customErr
-						}
-					}
-
-					err2 = jsonError
-				}
-			}
-
 			errs = append(errs, err2)
 		}
 		result = result && resultField && structResult
@@ -1146,7 +1125,12 @@ func typeCheck(v reflect.Value, t reflect.StructField, o reflect.Value, options 
 					return false, err
 				}
 			} else {
-				resultItem, err = ValidateStruct(v.MapIndex(k).Interface())
+				switch tagName {
+				case fixTagName:
+					resultItem, err = FixStruct(v.MapIndex(k).Addr().Interface())
+				default:
+					resultItem, err = ValidateStruct(v.MapIndex(k).Interface())
+				}
 				if err != nil {
 					return false, err
 				}
@@ -1156,29 +1140,46 @@ func typeCheck(v reflect.Value, t reflect.StructField, o reflect.Value, options 
 		return result, nil
 	case reflect.Slice, reflect.Array:
 		result := true
+		var errs Errors
 		for i := 0; i < v.Len(); i++ {
 			var resultItem bool
 			var err error
 			if v.Index(i).Kind() != reflect.Struct {
 				resultItem, err = typeCheck(v.Index(i), t, o, options, tagName)
 				if err != nil {
-					return false, err
+					if err != nil {
+						result = false
+						errs = append(errs, err)
+					}
 				}
 			} else {
-				resultItem, err = ValidateStruct(v.Index(i).Interface())
+				switch tagName {
+				case fixTagName:
+					resultItem, err = FixStruct(v.Index(i).Addr().Interface())
+				default:
+					resultItem, err = ValidateStruct(v.Index(i).Interface())
+				}
 				if err != nil {
-					return false, err
+					if err != nil {
+						result = false
+						errs = append(errs, err)
+					}
 				}
 			}
 			result = result && resultItem
 		}
-		return result, nil
+		return result, errs
 	case reflect.Interface:
 		// If the value is an interface then encode its element
 		if v.IsNil() {
 			return true, nil
 		}
-		return ValidateStruct(v.Interface())
+		switch tagName {
+		case fixTagName:
+			return FixStruct(v.Addr().Interface())
+		default:
+			return ValidateStruct(v.Interface())
+		}
 	case reflect.Ptr:
 		// If the value is a pointer then check its element
 		if v.IsNil() {
@@ -1186,7 +1187,12 @@ func typeCheck(v reflect.Value, t reflect.StructField, o reflect.Value, options 
 		}
 		return typeCheck(v.Elem(), t, o, options, tagName)
 	case reflect.Struct:
-		return ValidateStruct(v.Interface())
+		switch tagName {
+		case fixTagName:
+			return FixStruct(v.Addr().Interface())
+		default:
+			return ValidateStruct(v.Interface())
+		}
 	default:
 		return false, &UnsupportedTypeError{v.Type()}
 	}
