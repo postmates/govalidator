@@ -1147,7 +1147,11 @@ func typeCheck(v reflect.Value, t reflect.StructField, o reflect.Value, options 
 			}
 			result = result && resultItem
 		}
-		return result, errs
+		var err error
+		if len(errs) > 0 {
+			err = errs
+		}
+		return result, err
 	case reflect.Interface:
 		// If the value is an interface then encode its element
 		if v.IsNil() {
